@@ -1,121 +1,151 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-市场监测员 v1 —— SteamSpy 热门游戏 + 可移植性打分
-==================================================
-每天拉 SteamSpy 近两周最热的游戏，按"做成手机版的可移植性"打分，
-输出一张排好序的候选表（Markdown + JSON）。
+市场监测员 v2 —— SteamSpy 目标品类捞取 + 可移植性打分
+======================================================
+v1 的教训：用"近两周最热"当鱼塘，捞上来全是 AAA/网游（搬不动 / 早有手机版）。
+v2 改两点：
+  1. 换鱼塘：按"目标品类标签"（休闲/益智/回合/卡牌…）去捞，直接在对的池子里找。
+  2. 加硬门槛：MMO/大逃杀/巨型3D/玩家数过千万的，直接淘汰或重罚。
 
 用法:
-    python steam_scout.py                # 拉真实数据，输出今日候选表
-    python steam_scout.py --top 20       # 指定输出候选数量（默认 15）
-    python steam_scout.py --pool 40      # 参与精评的热门池大小（默认 35）
-    python steam_scout.py --no-enrich    # 不逐个补全标签（更快，但打分更糙）
-    python steam_scout.py --demo         # 用内置样例数据跑一遍（不联网，验证脚本）
+    python steam_scout.py                 # 真实数据，输出今日候选表
+    python steam_scout.py --top 20        # 输出数量（默认 15）
+    python steam_scout.py --demo          # 离线样例，验证脚本逻辑
+    python steam_scout.py --also-trending # 额外并入"近两周热门"里的小游戏
 
-依赖:
-    pip install requests
+依赖: pip install requests
 """
 
 import argparse
 import datetime as dt
 import json
+import re
 import sys
 import time
 
 try:
     import requests
 except ImportError:
-    requests = None  # --demo 模式下不需要
+    requests = None
 
 # ============================================================
-# 可调参数区（James 直接改这里就能调打分口味）
+# 可调参数区
 # ============================================================
 
-# 四个维度的权重（不必加起来等于 1，脚本会自动归一化）
-WEIGHTS = {
-    "heat":        0.35,   # 热度：越热越好
-    "portability": 0.35,   # 可移植性：越适合搬手机越好
-    "art":         0.15,   # 美术成本：越省美术越好
-    "legal":       0.15,   # 法律安全：越不容易踩 IP 越好
+# 鱼塘：去这些品类标签里捞候选（SteamSpy tag 端点）
+TARGET_TAGS = [
+    "Casual", "Puzzle", "Turn-Based Strategy", "Card Game",
+    "Idler", "Roguelike Deckbuilder", "Match 3", "Word Game",
+    "Tower Defense", "Clicker", "Board Game", "Hidden Object",
+]
+
+# 玩家数"甜区"（取 owners 区间中点）：太小没搜索需求，太大=AAA/多半已有手机版
+OWNERS_MIN = 50_000           # 低于此：太冷门，无流量价值
+OWNERS_SWEET = 3_000_000      # 甜区上沿：超过开始扣分
+OWNERS_HARD_CAP = 12_000_000  # 超过这个直接淘汰（AAA 体量）
+
+# 直接淘汰的标签（根本无法单人 clone）
+DISQUALIFY_TAGS = {
+    "mmorpg", "mmo", "massively multiplayer", "battle royale",
+    "moba", "vr", "vr only",
 }
 
-# 可移植性：这些标签代表"适合搬手机"（单手 / 回合 / 休闲 / 益智）
+# 可移植性：加分（适合搬手机）
 PORTABLE_TAGS = {
-    "casual", "puzzle", "turn-based", "card game", "deckbuilding",
-    "idle", "clicker", "match 3", "hypercasual", "board game",
-    "strategy", "roguelike", "roguelite", "tower defense",
-    "point & click", "indie", "minimalist", "singleplayer",
-    "2d platformer", "auto battler", "word game", "simulation",
+    "casual", "puzzle", "turn-based", "turn-based strategy", "card game",
+    "deckbuilding", "idle", "clicker", "match 3", "hypercasual",
+    "board game", "tower defense", "point & click", "minimalist",
+    "word game", "hidden object", "2d", "auto battler",
 }
-# 这些标签代表"不适合搬手机"（需要键鼠精准 / 重 3D / 高操作）
+# 可移植性：重扣（需键鼠精准 / 重 3D / 大体量）
 UNPORTABLE_TAGS = {
-    "fps", "first-person", "shooter", "action", "open world",
-    "souls-like", "racing", "flight", "rts", "moba",
-    "fighting", "3d platformer", "vr", "horror", "stealth",
-    "twin stick shooter", "hack and slash", "bullet hell",
+    "fps", "first-person", "shooter", "3d", "open world", "souls-like",
+    "racing", "flight", "rts", "fighting", "3d platformer", "horror",
+    "stealth", "hack and slash", "bullet hell", "action rpg",
+    "story rich", "open world survival craft",
 }
 
-# 美术成本：便宜的（加分）
-CHEAP_ART_TAGS = {
-    "pixel graphics", "2d", "minimalist", "hand-drawn",
-    "retro", "cute", "colorful", "top-down",
-}
-# 美术成本：贵的（减分）
-EXPENSIVE_ART_TAGS = {
-    "3d", "realistic", "photorealistic", "atmospheric",
-    "great soundtrack", "cinematic", "gore",
-}
+CHEAP_ART_TAGS = {"pixel graphics", "2d", "minimalist", "hand-drawn",
+                  "retro", "cute", "colorful", "top-down"}
+EXPENSIVE_ART_TAGS = {"3d", "realistic", "photorealistic", "atmospheric",
+                      "cinematic", "gore", "great soundtrack"}
 
-# 法律风险提示：命中这些大厂/强 IP 关键词时，降低"法律安全分"
 IP_RISK_PUBLISHERS = {
-    "valve", "nintendo", "sega", "capcom", "square enix",
-    "bandai namco", "ubisoft", "electronic arts", "activision",
-    "take-two", "rockstar", "bethesda", "disney", "warner",
+    "valve", "nintendo", "sega", "capcom", "square enix", "bandai namco",
+    "ubisoft", "electronic arts", "activision", "take-two", "rockstar",
+    "bethesda", "disney", "warner", "larian", "krafton", "game science",
 }
 
-# ============================================================
-# 数据获取
-# ============================================================
+WEIGHTS = {"demand": 0.30, "portability": 0.45, "art": 0.12, "legal": 0.13}
 
+# ============================================================
 STEAMSPY = "https://steamspy.com/api.php"
-HEADERS = {"User-Agent": "market-scout/1.0"}
+HEADERS = {"User-Agent": "market-scout/2.0"}
 
-
-def fetch_top_2weeks():
-    """拉近两周最热的 100 款游戏。返回 [game_dict, ...]，按热度降序。"""
-    r = requests.get(STEAMSPY, params={"request": "top100in2weeks"},
-                     headers=HEADERS, timeout=30)
-    r.raise_for_status()
-    data = r.json()  # 形如 { "appid": {游戏字段...}, ... }
-    games = list(data.values())
-    # SteamSpy 已按近两周玩家数排序，但保险起见用 average_2weeks 再排一次
-    games.sort(key=lambda g: _num(g.get("average_2weeks")), reverse=True)
-    return games
-
-
-def fetch_appdetails(appid):
-    """补全单款游戏的详细字段（含完整 tags）。"""
-    r = requests.get(STEAMSPY, params={"request": "appdetails", "appid": appid},
-                     headers=HEADERS, timeout=30)
-    r.raise_for_status()
-    return r.json()
-
-
-# ============================================================
-# 打分
-# ============================================================
 
 def _num(x):
-    """把 SteamSpy 里可能是字符串/None 的数字安全转成 float。"""
     try:
         return float(x)
     except (TypeError, ValueError):
         return 0.0
 
 
+def owners_midpoint(s):
+    """把 '1,000,000 .. 2,000,000' 解析成中点数字。"""
+    if not s:
+        return 0.0
+    nums = [int(n.replace(",", "")) for n in re.findall(r"[\d,]+", str(s))]
+    if not nums:
+        return 0.0
+    return sum(nums) / len(nums)
+
+
+def fetch_tag(tag):
+    r = requests.get(STEAMSPY, params={"request": "tag", "tag": tag},
+                     headers=HEADERS, timeout=30)
+    r.raise_for_status()
+    return list(r.json().values())
+
+
+def fetch_top_2weeks():
+    r = requests.get(STEAMSPY, params={"request": "top100in2weeks"},
+                     headers=HEADERS, timeout=30)
+    r.raise_for_status()
+    return list(r.json().values())
+
+
+def fetch_appdetails(appid):
+    r = requests.get(STEAMSPY, params={"request": "appdetails", "appid": appid},
+                     headers=HEADERS, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
+def build_pool(also_trending):
+    """从目标品类标签捞候选，去重。可选并入近两周热门。"""
+    seen, pool = set(), []
+    for tag in TARGET_TAGS:
+        try:
+            for g in fetch_tag(tag):
+                aid = g.get("appid")
+                if aid and aid not in seen:
+                    seen.add(aid); pool.append(g)
+        except Exception as e:
+            print(f"  标签 {tag} 拉取失败：{e}", file=sys.stderr)
+        time.sleep(1.1)
+    if also_trending:
+        try:
+            for g in fetch_top_2weeks():
+                aid = g.get("appid")
+                if aid and aid not in seen:
+                    seen.add(aid); pool.append(g)
+        except Exception:
+            pass
+    return pool
+
+
 def _tag_set(game):
-    """把游戏的 tags + genre 统一成一个小写标签集合。"""
     tags = set()
     raw = game.get("tags")
     if isinstance(raw, dict):
@@ -128,21 +158,36 @@ def _tag_set(game):
 
 
 def _overlap(tags, ref):
-    """tags 与参考集合的命中个数。"""
     return len(tags & ref)
 
 
-def heat_score(game, rank, total):
-    """热度分 0-100：榜单位置越靠前越高，再叠加近两周活跃。"""
-    pos = 100.0 * (1 - rank / max(total, 1))          # 排名分
-    active = min(_num(game.get("average_2weeks")) / 6.0, 100.0)  # 近两周人均分钟→粗略活跃
-    return round(0.7 * pos + 0.3 * active, 1)
+def is_disqualified(game, tags):
+    """硬淘汰：MMO/大逃杀/VR，或玩家数超 AAA 上限。"""
+    if tags & DISQUALIFY_TAGS:
+        return True
+    if owners_midpoint(game.get("owners")) > OWNERS_HARD_CAP:
+        return True
+    return False
+
+
+def demand_score(game):
+    """需求分 0-100：玩家数落在'甜区'最高，太小或太大都降。"""
+    owners = owners_midpoint(game.get("owners"))
+    if owners <= 0:
+        return 20.0
+    if owners < OWNERS_MIN:
+        return round(100.0 * owners / OWNERS_MIN * 0.5, 1)   # 太冷门，最多 50
+    if owners <= OWNERS_SWEET:
+        return 100.0                                          # 甜区
+    span = OWNERS_HARD_CAP - OWNERS_SWEET                     # 超甜区线性衰减
+    over = min(owners - OWNERS_SWEET, span)
+    return round(100.0 - 70.0 * over / span, 1)
 
 
 def portability_score(tags):
     base = 50.0
     base += 12 * _overlap(tags, PORTABLE_TAGS)
-    base -= 15 * _overlap(tags, UNPORTABLE_TAGS)
+    base -= 18 * _overlap(tags, UNPORTABLE_TAGS)
     return round(max(0.0, min(100.0, base)), 1)
 
 
@@ -157,139 +202,123 @@ def legal_score(game):
     base = 75.0
     pub = (game.get("publisher") or "").lower()
     dev = (game.get("developer") or "").lower()
-    for name in IP_RISK_PUBLISHERS:
-        if name in pub or name in dev:
-            base -= 35
-            break
+    if any(n in pub or n in dev for n in IP_RISK_PUBLISHERS):
+        base -= 35
     return round(max(0.0, min(100.0, base)), 1)
 
 
-def score_game(game, rank, total):
+def score_game(game):
     tags = _tag_set(game)
     subs = {
-        "heat":        heat_score(game, rank, total),
+        "demand": demand_score(game),
         "portability": portability_score(tags),
-        "art":         art_score(tags),
-        "legal":       legal_score(game),
+        "art": art_score(tags),
+        "legal": legal_score(game),
     }
     wsum = sum(WEIGHTS.values())
     composite = sum(subs[k] * WEIGHTS[k] for k in WEIGHTS) / wsum
-    total10 = round(composite / 10.0, 1)   # 归一到 0-10，对齐看板"候选评分"
     return {
         "appid": game.get("appid"),
         "name": game.get("name", "?"),
-        "score": total10,
+        "score": round(composite / 10.0, 1),
         "subs": subs,
+        "owners": game.get("owners", ""),
         "tags_preview": ", ".join(sorted(list(tags))[:6]),
         "publisher": game.get("publisher", ""),
         "url": f"https://store.steampowered.com/app/{game.get('appid')}/",
     }
 
 
-# ============================================================
-# 输出
-# ============================================================
-
 def to_markdown(scored, top_n):
     today = dt.date.today().isoformat()
     lines = [
         f"# 今日候选表 · {today}",
         "",
-        f"> 数据源 SteamSpy 近两周最热 · 已按可移植性打分 · 取 Top {top_n}",
-        "> 「移动版」一栏需人工二次确认（SteamSpy 不提供），上架前去 App Store / Play 搜一下。",
+        f"> 鱼塘=目标品类标签 · 已淘汰 AAA/网游 · 取 Top {top_n}",
+        "> 「移动版」需人工二次确认（SteamSpy 不提供），上架前去 App Store / Play 搜原名。",
         "",
-        "| # | 名称 | 评分 | 热度 | 可移植 | 美术 | 法律 | 标签摘要 | 移动版 | Steam |",
+        "| # | 名称 | 评分 | 需求 | 可移植 | 美术 | 法律 | 标签摘要 | 移动版 | Steam |",
         "|---|------|------|------|--------|------|------|----------|--------|-------|",
     ]
     for i, s in enumerate(scored[:top_n], 1):
-        sub = s["subs"]
+        b = s["subs"]
         lines.append(
-            f"| {i} | {s['name']} | **{s['score']}** | {sub['heat']:.0f} | "
-            f"{sub['portability']:.0f} | {sub['art']:.0f} | {sub['legal']:.0f} | "
+            f"| {i} | {s['name']} | **{s['score']}** | {b['demand']:.0f} | "
+            f"{b['portability']:.0f} | {b['art']:.0f} | {b['legal']:.0f} | "
             f"{s['tags_preview']} | 待确认 | [↗]({s['url']}) |"
         )
-    lines.append("")
-    return "\n".join(lines)
+    return "\n".join(lines) + "\n"
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--top", type=int, default=15, help="输出候选数量")
-    ap.add_argument("--pool", type=int, default=35, help="参与精评的热门池大小")
-    ap.add_argument("--no-enrich", action="store_true", help="不逐个补全标签")
-    ap.add_argument("--demo", action="store_true", help="用样例数据离线跑")
+    ap.add_argument("--top", type=int, default=15)
+    ap.add_argument("--also-trending", action="store_true")
+    ap.add_argument("--demo", action="store_true")
     args = ap.parse_args()
 
     if args.demo:
-        games = DEMO_GAMES
+        pool = DEMO_GAMES
     else:
         if requests is None:
             sys.exit("缺少 requests，请先 pip install requests（或用 --demo）")
-        print("拉取 SteamSpy 近两周最热…", file=sys.stderr)
-        games = fetch_top_2weeks()
-
-    # 先按热度取热门池，只精评这批，省请求
-    pool = games[: args.pool]
-
-    # 补全标签（默认开，礼貌限速 1.1s/次）
-    if not args.demo and not args.no_enrich:
-        print(f"补全 {len(pool)} 款的标签（约 {len(pool)} 秒）…", file=sys.stderr)
-        for g in pool:
+        print("按目标品类标签捞候选…", file=sys.stderr)
+        pool = build_pool(args.also_trending)
+        # 补全缺标签前，先按玩家数粗排，只给前 ENRICH_CAP 个补全，省请求
+        pool.sort(key=lambda g: owners_midpoint(g.get("owners")), reverse=True)
+        ENRICH_CAP, enriched = 60, 0
+        for g in pool:                       # 补全缺标签的（限速）
+            if enriched >= ENRICH_CAP:
+                break
             if not g.get("tags"):
+                enriched += 1
                 try:
-                    detail = fetch_appdetails(g.get("appid"))
-                    g["tags"] = detail.get("tags")
-                    g["genre"] = detail.get("genre") or g.get("genre")
-                    g["publisher"] = detail.get("publisher") or g.get("publisher")
-                    g["developer"] = detail.get("developer") or g.get("developer")
+                    d = fetch_appdetails(g.get("appid"))
+                    g["tags"] = d.get("tags"); g["genre"] = d.get("genre")
+                    g["owners"] = d.get("owners") or g.get("owners")
+                    g["publisher"] = d.get("publisher"); g["developer"] = d.get("developer")
                 except Exception:
                     pass
                 time.sleep(1.1)
 
-    total = len(pool)
-    scored = [score_game(g, rank, total) for rank, g in enumerate(pool)]
-    scored.sort(key=lambda s: s["score"], reverse=True)
+    survivors = [g for g in pool if not is_disqualified(g, _tag_set(g))]
+    scored = sorted((score_game(g) for g in survivors),
+                    key=lambda s: s["score"], reverse=True)
 
     today = dt.date.today().isoformat()
     md = to_markdown(scored, args.top)
-
-    md_path = f"候选表_{today}.md"
-    json_path = f"候选_{today}.json"
-    with open(md_path, "w", encoding="utf-8") as f:
+    with open(f"候选表_{today}.md", "w", encoding="utf-8") as f:
         f.write(md)
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(scored[: args.top], f, ensure_ascii=False, indent=2)
-
+    with open(f"候选_{today}.json", "w", encoding="utf-8") as f:
+        json.dump(scored[:args.top], f, ensure_ascii=False, indent=2)
     print(md)
-    print(f"\n已保存: {md_path} / {json_path}", file=sys.stderr)
+    print(f"\n池子 {len(pool)} → 淘汰 {len(pool)-len(survivors)} → 候选 "
+          f"{min(args.top, len(scored))}", file=sys.stderr)
 
 
 # ============================================================
-# 离线样例数据（--demo 用，验证脚本逻辑）
+# 离线样例（--demo）：混入 AAA 验证淘汰/降权是否生效
 # ============================================================
-
 DEMO_GAMES = [
-    {"appid": 1001, "name": "ColorRush（变色躲障碍·示例）",
-     "average_2weeks": 320, "genre": "Casual, Indie",
-     "tags": {"Casual": 900, "Puzzle": 700, "Pixel Graphics": 400, "2D": 500},
-     "publisher": "Tiny Indie", "developer": "Tiny Indie"},
-    {"appid": 1002, "name": "MegaShooter 9（重 3D 射击·示例）",
-     "average_2weeks": 410, "genre": "Action, FPS",
-     "tags": {"FPS": 1200, "Shooter": 900, "3D": 800, "Realistic": 600},
-     "publisher": "Valve", "developer": "Valve"},
-    {"appid": 1003, "name": "Deck Tactics（回合卡牌·示例）",
-     "average_2weeks": 260, "genre": "Strategy, Indie",
-     "tags": {"Turn-Based": 800, "Card Game": 850, "Deckbuilding": 700,
-              "Roguelike": 500, "2D": 400},
-     "publisher": "Indie Co", "developer": "Indie Co"},
-    {"appid": 1004, "name": "Idle Empire（放置经营·示例）",
-     "average_2weeks": 180, "genre": "Casual, Simulation",
-     "tags": {"Idle": 900, "Clicker": 700, "Casual": 600, "Minimalist": 300},
-     "publisher": "Solo Dev", "developer": "Solo Dev"},
-    {"appid": 1005, "name": "RaceKing 3D（竞速·示例）",
-     "average_2weeks": 300, "genre": "Racing, Sports",
-     "tags": {"Racing": 1000, "3D": 700, "Atmospheric": 400},
-     "publisher": "Indie Co", "developer": "Indie Co"},
+    {"appid": 1, "name": "ColorRush（休闲益智·示例）", "owners": "200,000 .. 500,000",
+     "genre": "Casual", "tags": {"Casual": 9, "Puzzle": 7, "Pixel Graphics": 4, "2D": 5},
+     "publisher": "Tiny", "developer": "Tiny"},
+    {"appid": 2, "name": "Baldur's Gate 3（AAA RPG·应被淘汰）",
+     "owners": "20,000,000 .. 50,000,000", "genre": "RPG",
+     "tags": {"Turn-Based": 8, "RPG": 9, "3D": 8, "Story Rich": 7, "Open World": 6},
+     "publisher": "Larian", "developer": "Larian"},
+    {"appid": 3, "name": "DeckLoop（回合卡牌·示例）", "owners": "300,000 .. 800,000",
+     "genre": "Strategy", "tags": {"Turn-Based": 8, "Card Game": 9, "Deckbuilding": 7, "2D": 4},
+     "publisher": "Indie", "developer": "Indie"},
+    {"appid": 4, "name": "PUBG（大逃杀·应被淘汰）", "owners": "50,000,000 .. 100,000,000",
+     "genre": "Action", "tags": {"Battle Royale": 9, "Shooter": 8, "3D": 7},
+     "publisher": "KRAFTON", "developer": "KRAFTON"},
+    {"appid": 5, "name": "IdleTown（放置·示例）", "owners": "100,000 .. 200,000",
+     "genre": "Casual", "tags": {"Idle": 9, "Clicker": 7, "Casual": 6, "Minimalist": 3},
+     "publisher": "Solo", "developer": "Solo"},
+    {"appid": 6, "name": "TinyTowerDefense（塔防·示例）", "owners": "400,000 .. 900,000",
+     "genre": "Strategy", "tags": {"Tower Defense": 9, "Strategy": 6, "2D": 5, "Cute": 4},
+     "publisher": "Indie", "developer": "Indie"},
 ]
 
 if __name__ == "__main__":
