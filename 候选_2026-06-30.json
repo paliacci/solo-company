@@ -1,0 +1,212 @@
+[
+  {
+    "appid": 413150,
+    "name": "Stardew Valley",
+    "score": 5.6,
+    "subs": {
+      "heat": 14.0,
+      "portability": 83.0,
+      "art": 74.0,
+      "legal": 75.0
+    },
+    "tags_preview": "2d, agriculture, building, casual, crafting, cute",
+    "publisher": "ConcernedApe",
+    "url": "https://store.steampowered.com/app/413150/"
+  },
+  {
+    "appid": 1086940,
+    "name": "Baldur's Gate 3",
+    "score": 5.5,
+    "subs": {
+      "heat": 30.0,
+      "portability": 74.0,
+      "art": 50.0,
+      "legal": 75.0
+    },
+    "tags_preview": "adventure, character customization, choices matter, class-based, co-op campaign, combat",
+    "publisher": "Larian Studios",
+    "url": "https://store.steampowered.com/app/1086940/"
+  },
+  {
+    "appid": 1623730,
+    "name": "Palworld",
+    "score": 5.2,
+    "subs": {
+      "heat": 64.0,
+      "portability": 32.0,
+      "art": 50.0,
+      "legal": 75.0
+    },
+    "tags_preview": "action, adventure, anime, automation, base-building, building",
+    "publisher": "Pocketpair",
+    "url": "https://store.steampowered.com/app/1623730/"
+  },
+  {
+    "appid": 1063730,
+    "name": "New World: Aeternum",
+    "score": 5.0,
+    "subs": {
+      "heat": 58.0,
+      "portability": 32.0,
+      "art": 50.0,
+      "legal": 75.0
+    },
+    "tags_preview": "action, adventure, character customization, co-op, crafting, fantasy",
+    "publisher": "Amazon Games",
+    "url": "https://store.steampowered.com/app/1063730/"
+  },
+  {
+    "appid": 105600,
+    "name": "Terraria",
+    "score": 4.9,
+    "subs": {
+      "heat": 36.0,
+      "portability": 44.0,
+      "art": 62.0,
+      "legal": 75.0
+    },
+    "tags_preview": "2d, action, adventure, atmospheric, building, co-op",
+    "publisher": "Re-Logic",
+    "url": "https://store.steampowered.com/app/105600/"
+  },
+  {
+    "appid": 291550,
+    "name": "Brawlhalla",
+    "score": 4.7,
+    "subs": {
+      "heat": 28.0,
+      "portability": 68.0,
+      "art": 50.0,
+      "legal": 40.0
+    },
+    "tags_preview": "2d fighter, 2d platformer, 4 player local, action, cartoony, casual",
+    "publisher": "Ubisoft",
+    "url": "https://store.steampowered.com/app/291550/"
+  },
+  {
+    "appid": 431960,
+    "name": "Wallpaper Engine",
+    "score": 4.6,
+    "subs": {
+      "heat": 32.0,
+      "portability": 41.0,
+      "art": 62.0,
+      "legal": 75.0
+    },
+    "tags_preview": "action, animation & modeling, anime, casual, cute, design & illustration",
+    "publisher": "Wallpaper Engine Team",
+    "url": "https://store.steampowered.com/app/431960/"
+  },
+  {
+    "appid": 1599340,
+    "name": "Lost Ark",
+    "score": 4.5,
+    "subs": {
+      "heat": 48.0,
+      "portability": 32.0,
+      "art": 38.0,
+      "legal": 75.0
+    },
+    "tags_preview": "action, action rpg, adventure, character customization, class-based, fantasy",
+    "publisher": "Amazon Games",
+    "url": "https://store.steampowered.com/app/1599340/"
+  },
+  {
+    "appid": 578080,
+    "name": "PUBG: BATTLEGROUNDS",
+    "score": 4.2,
+    "subs": {
+      "heat": 66.0,
+      "portability": 0.0,
+      "art": 50.0,
+      "legal": 75.0
+    },
+    "tags_preview": "action, adventure, battle royale, co-op, competitive, difficult",
+    "publisher": "KRAFTON, Inc.",
+    "url": "https://store.steampowered.com/app/578080/"
+  },
+  {
+    "appid": 2358720,
+    "name": "Black Myth: Wukong",
+    "score": 4.1,
+    "subs": {
+      "heat": 56.0,
+      "portability": 17.0,
+      "art": 26.0,
+      "legal": 75.0
+    },
+    "tags_preview": "3d, action, action rpg, action-adventure, adventure, atmospheric",
+    "publisher": "Game Science",
+    "url": "https://store.steampowered.com/app/2358720/"
+  },
+  {
+    "appid": 230410,
+    "name": "Warframe",
+    "score": 3.9,
+    "subs": {
+      "heat": 40.0,
+      "portability": 17.0,
+      "art": 50.0,
+      "legal": 75.0
+    },
+    "tags_preview": "action, action rpg, character customization, co-op, free to play, hack and slash",
+    "publisher": "Digital Extremes",
+    "url": "https://store.steampowered.com/app/230410/"
+  },
+  {
+    "appid": 552990,
+    "name": "World of Warships",
+    "score": 3.9,
+    "subs": {
+      "heat": 18.0,
+      "portability": 44.0,
+      "art": 38.0,
+      "legal": 75.0
+    },
+    "tags_preview": "action, co-op, free to play, historical, massively multiplayer, military",
+    "publisher": "Wargaming Group Limited",
+    "url": "https://store.steampowered.com/app/552990/"
+  },
+  {
+    "appid": 304930,
+    "name": "Unturned",
+    "score": 3.8,
+    "subs": {
+      "heat": 50.0,
+      "portability": 11.0,
+      "art": 38.0,
+      "legal": 75.0
+    },
+    "tags_preview": "action, adventure, atmospheric, casual, co-op, crafting",
+    "publisher": "Smartly Dressed Games",
+    "url": "https://store.steampowered.com/app/304930/"
+  },
+  {
+    "appid": 730,
+    "name": "Counter-Strike: Global Offensive",
+    "score": 3.7,
+    "subs": {
+      "heat": 70.0,
+      "portability": 2.0,
+      "art": 38.0,
+      "legal": 40.0
+    },
+    "tags_preview": "action, co-op, competitive, difficult, e-sports, fast-paced",
+    "publisher": "Valve",
+    "url": "https://store.steampowered.com/app/730/"
+  },
+  {
+    "appid": 553850,
+    "name": "HELLDIVERS 2",
+    "score": 3.6,
+    "subs": {
+      "heat": 42.0,
+      "portability": 17.0,
+      "art": 26.0,
+      "legal": 75.0
+    },
+    "tags_preview": "action, capitalism, co-op, comedy, difficult, extraction shooter",
+    "publisher": "PlayStation Publishing LLC",
+    "url": "https://store.steampowered.com/app/553850/"
+  }
+]
